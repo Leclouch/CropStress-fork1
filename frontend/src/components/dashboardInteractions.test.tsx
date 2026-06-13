@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BlockDetailPanel } from "./BlockDetailPanel";
 import { EstateMap } from "./EstateMap";
 import { FieldVerificationForm } from "./FieldVerificationForm";
+import { RiskBadge } from "./RiskBadge";
 import { ScoutingPriorityList } from "./ScoutingPriorityList";
 import type { LatestBlockRisk, ScoutingPriorityRow } from "@/lib/queries";
 
@@ -54,6 +55,41 @@ const priorityRows: ScoutingPriorityRow[] = [
 ];
 
 describe("dashboard components", () => {
+  it("keeps the risk explanation tooltip inside the viewport", async () => {
+    const user = userEvent.setup();
+    const originalInnerWidth = window.innerWidth;
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 320,
+    });
+
+    render(<RiskBadge category="Watch" score={0.2592} />);
+
+    const badge = screen.getByLabelText(/Watch risk/i);
+    vi.spyOn(badge, "getBoundingClientRect").mockReturnValue({
+      bottom: 40,
+      height: 24,
+      left: 290,
+      right: 320,
+      top: 16,
+      width: 30,
+      x: 290,
+      y: 16,
+      toJSON: () => ({}),
+    });
+
+    await user.hover(badge);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.style.left).toBe("20px");
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: originalInnerWidth,
+    });
+  });
+
   it("renders priority columns and selects a row", async () => {
     const onSelectBlock = vi.fn();
     const user = userEvent.setup();
@@ -71,6 +107,12 @@ describe("dashboard components", () => {
     expect(screen.getByText("Risk")).toBeTruthy();
     expect(screen.getByText("Driver")).toBeTruthy();
     expect(screen.getByText("Action")).toBeTruthy();
+    expect(
+      screen.getByLabelText(/Watch risk.*score range 0.25-0.44/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText(/30% vegetation.*25% rainfall/i)
+    ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /select B-041/i }));
 
@@ -82,11 +124,13 @@ describe("dashboard components", () => {
 
     expect(screen.getByText("Block code")).toBeTruthy();
     expect(screen.getByText("Risk category")).toBeTruthy();
+    expect(screen.getAllByLabelText(/Watch risk/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Risk score")).toBeTruthy();
     expect(screen.getByText("Dominant driver")).toBeTruthy();
     expect(screen.getByText("Recommended action")).toBeTruthy();
     expect(screen.getByText("NDVI value")).toBeTruthy();
     expect(screen.getByText("NDMI value")).toBeTruthy();
+    expect(screen.getByText("Hotspots (7d)")).toBeTruthy();
     expect(screen.getByText("Rainfall deficit")).toBeTruthy();
     expect(screen.getByText("Nearest hotspot distance")).toBeTruthy();
     expect(screen.getByText("Quality flag")).toBeTruthy();
@@ -134,6 +178,54 @@ describe("dashboard components", () => {
     expect(screen.getByText("NDVI satellite index · Risk overlay 50%")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Select B-041" }));
+    expect(onSelectBlock).toHaveBeenCalledWith("B-041");
+  });
+
+  it("renders and selects every part of a MultiPolygon block", async () => {
+    const onSelectBlock = vi.fn();
+    const user = userEvent.setup();
+    const multiPolygonBlock: LatestBlockRisk = {
+      ...block,
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [
+          [
+            [
+              [101.38, -0.52],
+              [101.39, -0.52],
+              [101.39, -0.51],
+              [101.38, -0.51],
+              [101.38, -0.52],
+            ],
+          ],
+          [
+            [
+              [101.4, -0.5],
+              [101.41, -0.5],
+              [101.41, -0.49],
+              [101.4, -0.49],
+              [101.4, -0.5],
+            ],
+          ],
+        ],
+      },
+    };
+
+    const { container } = render(
+      <EstateMap
+        blocks={[multiPolygonBlock]}
+        selectedBlockId={multiPolygonBlock.block_id}
+        onSelectBlock={onSelectBlock}
+      />
+    );
+
+    expect(
+      container.querySelectorAll('polygon[data-risk-overlay="true"]')
+    ).toHaveLength(2);
+
+    await user.click(
+      screen.getByRole("button", { name: "Select B-041 part 2" })
+    );
     expect(onSelectBlock).toHaveBeenCalledWith("B-041");
   });
 

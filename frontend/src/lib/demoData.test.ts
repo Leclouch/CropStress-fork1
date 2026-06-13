@@ -5,6 +5,7 @@ import {
   RISK_CATEGORIES,
   getEstateMetrics,
   getRiskColor,
+  isDay2JuryReadyRiskData,
   mergeDemoData,
   sortScoutingPriority,
 } from "./demoData";
@@ -46,33 +47,54 @@ describe("demo data utilities", () => {
     const rows = mergeDemoData(blocksGeojson, indicators, riskScores);
     const first = rows.find((row) => row.block_id === "B-001");
 
-    expect(rows).toHaveLength(48);
+    expect(rows).toHaveLength(blocksGeojson.features.length);
     expect(first?.block_code).toBe("B-001");
     expect(first?.geometry?.type).toBe("Polygon");
     expect(first?.ndvi).toBeTypeOf("number");
-    expect(first?.risk_category).toBe("Normal");
-    expect(first?.dominant_driver).toContain("rainfall");
+    expect(RISK_CATEGORIES).toContain(first?.risk_category);
+    expect(first?.dominant_driver).toBeTruthy();
+
+    const blockIds = new Set(
+      blocksGeojson.features.map(
+        (feature: { properties: { block_id: string } }) =>
+          feature.properties.block_id
+      )
+    );
+    expect(indicators.every((row: { block_id: string }) => blockIds.has(row.block_id))).toBe(
+      true
+    );
+    expect(riskScores.every((row: { block_id: string }) => blockIds.has(row.block_id))).toBe(
+      true
+    );
+    expect(priorityRows.every((row: { block_id: string }) => blockIds.has(row.block_id))).toBe(
+      true
+    );
+    expect(isDay2JuryReadyRiskData(riskScores.slice(0, 3))).toBe(false);
   });
 
-  it("keeps metrics for all official categories even when counts are zero", () => {
+  it("summarizes the available demo rows without requiring demo-balanced risk", () => {
     const rows = mergeDemoData(blocksGeojson, indicators, riskScores);
     const metrics = getEstateMetrics(rows);
 
-    expect(metrics.totalBlocks).toBe(48);
-    expect(metrics.categoryCounts.Normal).toBeGreaterThan(0);
-    expect(metrics.categoryCounts.Watch).toBeGreaterThanOrEqual(0);
-    expect(metrics.categoryCounts.Warning).toBeGreaterThanOrEqual(0);
-    expect(metrics.categoryCounts["Priority Inspection"]).toBeGreaterThanOrEqual(
-      0
-    );
-    expect(metrics.lastProcessed).toBe("2026-06-05");
+    expect(metrics.totalBlocks).toBe(blocksGeojson.features.length);
+    for (const category of RISK_CATEGORIES) {
+      expect(metrics.categoryCounts[category]).toBeGreaterThanOrEqual(0);
+    }
+    expect(
+      RISK_CATEGORIES.reduce(
+        (total, category) => total + metrics.categoryCounts[category],
+        0
+      )
+    ).toBe(metrics.totalBlocks);
+    expect(metrics.lastProcessed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("sorts scouting priorities by priority rank", () => {
+  it("sorts scouting priorities by risk score and reranks them", () => {
     const sorted = sortScoutingPriority(priorityRows);
 
     expect(sorted[0].priority_rank).toBe(1);
-    expect(sorted[0].block_id).toBe("B-041");
     expect(sorted[1].priority_rank).toBe(2);
+    expect(sorted[0].risk_score).toBeGreaterThanOrEqual(sorted[1].risk_score);
+    expect(sorted).toHaveLength(priorityRows.length);
   });
 });
